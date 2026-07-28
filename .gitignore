@@ -1,0 +1,9 @@
+# La caja fuerte: nunca sube al mundo
+.env
+
+# El entorno virtual: se reconstruye desde requirements.txt, no se sube
+venv/
+
+# Basura que Python genera sola al correr
+__pycache__/
+*.pyc
