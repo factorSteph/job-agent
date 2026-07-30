@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 regiones_buenas = ["worldwide", "americas", "latam", "cst", "utc-6"]
 
 # ============================================================
-# LAS DOS MÁQUINAS TRADUCTORAS (se definen, todavía no se usan)
+# LAS MÁQUINAS TRADUCTORAS: una por board, todas producen la misma ficha estándar
 # ============================================================
 
 def traducir_wwr(puesto):
@@ -109,7 +109,7 @@ def traducir_remoteok(puesto):
 
 
 # ============================================================
-# BLOQUE 1: traer y traducir los dos boards a UNA bolsa común
+# BLOQUE 1: traer y traducir los seis boards a UNA bolsa común
 # ============================================================
 
 fichas = []
@@ -120,11 +120,11 @@ feed = feedparser.parse(url_wwr)
 for puesto in feed.entries:
     fichas.append(traducir_wwr(puesto))
 
-# Himalayas (con paginación, con tope)
+# Himalayas (con paginación, con tope) 
 offset = 0
-tope = 2000
+tope_himalayas = 2000
 
-while offset < tope:
+while offset < tope_himalayas:
     url_himalayas = "https://himalayas.app/jobs/api?limit=20&offset=" + str(offset)
     respuesta = requests.get(url_himalayas)
     datos = respuesta.json()
@@ -168,7 +168,7 @@ for puesto in datos[1:]:
     fichas.append(traducir_remoteok(puesto))
 
 # ============================================================
-# BLOQUE 2: filtrar la bolsa entera (WWR + Himalayas juntos)
+# BLOQUE 2: filtrar la bolsa entera (los seis boards juntos)
 # ============================================================
 
 sospechosos = ["us only", "us based", "usa", "united states", "u.s.", "w2"]
@@ -344,10 +344,10 @@ cuenta_send = 0
 cuenta_skip = 0
 cuenta_error = 0
 
-# TOPE DE SEGURIDAD: primero 20, no las 401. Subir a len(sobrevivientes) cuando esté validado.
-tope_prueba = len(sobrevivientes)
+# TOPE: en producción va en len(sobrevivientes). Bajarlo a un número chico (ej. 20) para probar barato
+tope_juez = len(sobrevivientes)
 
-for i, ficha in enumerate(sobrevivientes[:tope_prueba]):
+for i, ficha in enumerate(sobrevivientes[:tope_juez]):
 
     puesto_texto = "TITLE: " + ficha["titulo"] + "\n\nDESCRIPTION: " + ficha["texto"]
 
@@ -371,7 +371,7 @@ for i, ficha in enumerate(sobrevivientes[:tope_prueba]):
     # --- Blindaje: si la IA no devolvió veredicto, anotamos y seguimos ---
     if "choices" not in datos_ia:
         print("---")
-        print("⚠️ [" + str(i + 1) + "/" + str(tope_prueba) + "]", ficha["board"], "—", ficha["titulo"])
+        print("⚠️ [" + str(i + 1) + "/" + str(tope_juez) + "]", ficha["board"], "—", ficha["titulo"])
         print("La IA no devolvió veredicto. HTTP:", respuesta_ia.status_code)
         cuenta_error = cuenta_error + 1
         continue
@@ -379,11 +379,15 @@ for i, ficha in enumerate(sobrevivientes[:tope_prueba]):
     veredicto = datos_ia["choices"][0]["message"]["content"]
 
     print("---")
-    print("[" + str(i + 1) + "/" + str(tope_prueba) + "]", ficha["board"], "—", ficha["titulo"])
+    print("[" + str(i + 1) + "/" + str(tope_juez) + "]", ficha["board"], "—", ficha["titulo"])
     print(veredicto)
 
     # --- Leer la decisión y guardar si es SEND ---
     if "SEND" in veredicto:
+        if "REASON:" in veredicto:
+            ficha["razon"] = veredicto.split("REASON:")[1].strip()
+        else:
+            ficha["razon"] = "sin_dato"
         aprobados.append(ficha)
         cuenta_send = cuenta_send + 1
     else:
@@ -395,8 +399,39 @@ for i, ficha in enumerate(sobrevivientes[:tope_prueba]):
 
 print("---")
 print("=== RESUMEN DEL JUEZ ===")
-print("Juzgadas:", tope_prueba)
+print("Juzgadas:", tope_juez)
 print("SEND (aprobadas):", cuenta_send)
 print("SKIP (descartadas):", cuenta_skip)
 print("Errores de IA:", cuenta_error)
 print("Fichas en la lista de aprobados:", len(aprobados))
+
+# ============================================================
+# BLOQUE 7 (Capa 4): despachar el correo
+# ============================================================
+
+import smtplib
+from email.message import EmailMessage
+
+clave_gmail = os.environ["GMAIL_APP_PASSWORD"]
+mi_correo = "steph.jimenezcor@gmail.com"
+
+if aprobados == []:
+    print("---")
+    print("0 aprobados hoy. No se manda correo.")
+else:
+    cuerpo = "Tu agente encontró " + str(len(aprobados)) + " puestos hoy:\n\n"
+    for ficha in aprobados:
+        cuerpo = cuerpo + ficha["titulo"] + " | " + ficha["razon"] + " Link: " + ficha["url"] + "\n"
+
+    correo = EmailMessage()
+    correo["Subject"] = "Job Agent: " + str(len(aprobados)) + " puestos encontrados"
+    correo["From"] = mi_correo
+    correo["To"] = mi_correo
+    correo.set_content(cuerpo)
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as servidor:
+        servidor.login(mi_correo, clave_gmail)
+        servidor.send_message(correo)
+
+    print("---")
+    print("Correo despachado con", len(aprobados), "puestos.")
