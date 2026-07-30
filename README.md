@@ -73,6 +73,7 @@ Then:
 ```bash
 python buscar_empleos.py
 ```
+The scheduled run lives in .github/workflows/job-agent.yml (daily at 7am Costa Rica time). It can also be triggered manually from the Actions tab via workflow_dispatch.
 
 The judge's criteria (target roles, hard NOs, screening rules) are written for my profile. To use this for your own search, edit the system prompt in `buscar_empleos.py`. A configurable version is on the roadmap.
 
@@ -163,6 +164,7 @@ Después:
 ```bash
 python buscar_empleos.py
 ```
+La corrida agendada vive en .github/workflows/job-agent.yml (diaria, 7am hora de Costa Rica). También se puede disparar manualmente desde la pestaña Actions vía workflow_dispatch.
 
 Los criterios del juez (roles objetivo, NOs duros, reglas de filtrado) están escritos para mi perfil. Para usar esto en tu propia búsqueda, editá el system prompt en `buscar_empleos.py`. Una versión configurable está en el roadmap.
 
