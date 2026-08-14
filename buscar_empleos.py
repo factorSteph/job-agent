@@ -59,13 +59,25 @@ def traducir_remotive(puesto):
     return ficha
 
 def traducir_arbeitnow(puesto):
+    # ARREGLADO (Sesión 11) — antes esto era hardcodeado a "sin_dato", que el
+    # Checkpoint 2 trata como "pasa siempre". Por eso TODO lo de Arbeitnow
+    # pasaba el filtro de país sin importar si era Berlín, Londres o Konstanz
+    # on-site. La API real trae "remote" (booleano) y "location" (texto).
+    # Decisión de Steph: Arbeitnow es el board que más basura manda —
+    # descarte duro si remote no es True. No pasa a la IA como contexto.
+    es_remoto = puesto.get("remote", False)
+    if es_remoto:
+        restriccion = []
+    else:
+        restriccion = ["fuera"]
+
     ficha = {
         "titulo": puesto["title"],
         "empresa": puesto["company_name"],
         "url": puesto["url"],
         "texto": puesto["description"],
         "board": "Arbeitnow",
-        "restriccion_pais": ["sin_dato"],
+        "restriccion_pais": restriccion,
         "categorias": ["sin_dato"]
     }
 
@@ -114,11 +126,23 @@ def traducir_remoteok(puesto):
 
 fichas = []
 
+# NUEVO (Sesión 11) — deduplicación por URL. Un set() nunca permite
+# repetidos, como una hoja de asistencia: si el nombre ya está marcado, no
+# se vuelve a marcar. Se hace ACÁ, al armar la bolsa, no después: así un
+# duplicado ni siquiera gasta checkpoints ni tokens de IA.
+urls_vistas = set()
+
+def agregar_si_nueva(ficha):
+    if ficha["url"] in urls_vistas:
+        return
+    urls_vistas.add(ficha["url"])
+    fichas.append(ficha)
+
 # WWR
 url_wwr = "https://weworkremotely.com/remote-jobs.rss"
 feed = feedparser.parse(url_wwr)
 for puesto in feed.entries:
-    fichas.append(traducir_wwr(puesto))
+    agregar_si_nueva(traducir_wwr(puesto))
 
 # Himalayas (con paginación, con tope)
 offset = 0
@@ -134,7 +158,7 @@ while offset < tope_himalayas:
         break
 
     for puesto in lote:
-        fichas.append(traducir_himalayas(puesto))
+        agregar_si_nueva(traducir_himalayas(puesto))
 
     offset = offset + 20
 
@@ -143,21 +167,21 @@ url_remotive = "https://remotive.com/api/remote-jobs"
 respuesta = requests.get(url_remotive)
 datos = respuesta.json()
 for puesto in datos["jobs"]:
-    fichas.append(traducir_remotive(puesto))
+    agregar_si_nueva(traducir_remotive(puesto))
 
 # Arbeitnow (una sola página, ~110 puestos)
 url_arbeitnow = "https://www.arbeitnow.com/api/job-board-api"
 respuesta = requests.get(url_arbeitnow)
 datos = respuesta.json()
 for puesto in datos["data"]:
-    fichas.append(traducir_arbeitnow(puesto))
+    agregar_si_nueva(traducir_arbeitnow(puesto))
 
 # Jobicy (una sola página, ~100 puestos)
 url_jobicy = "https://jobicy.com/api/v2/remote-jobs"
 respuesta = requests.get(url_jobicy)
 datos = respuesta.json()
 for puesto in datos["jobs"]:
-    fichas.append(traducir_jobicy(puesto))
+    agregar_si_nueva(traducir_jobicy(puesto))
 
 # RemoteOK (lista pelada, con metadata en [0] que hay que saltar)
 url_remoteok = "https://remoteok.com/api"
@@ -165,7 +189,7 @@ headers = {"User-Agent": "job-alert-agent"}
 respuesta = requests.get(url_remoteok, headers=headers)
 datos = respuesta.json()
 for puesto in datos[1:]:
-    fichas.append(traducir_remoteok(puesto))
+    agregar_si_nueva(traducir_remoteok(puesto))
 
 # ============================================================
 # BLOQUE 2: filtrar la bolsa entera (los seis boards juntos)
@@ -186,6 +210,26 @@ titulos_no = [
     "it support", "it maintenance", "help desk", "helpdesk", "service desk",
     "security engineer", "web developer", "web development",
     "ai enablement", "ai strategy", "ai transformation",
+    # --- Categoría A (Sesión 11): ingeniería genérica de software/infra.
+    # Se colaban con razones tipo "aligns with her operations focus" solo
+    # porque el título dice "automation" o "engineer" en algún lado.
+    # OJO: NO se pone "automation engineer" suelto — mataría matches buenos
+    # (AI Integration & Automation, Automation Specialist). Se apunta a las
+    # combinaciones específicas que salieron hoy (QA/test/mobile automation
+    # de software) y a ingeniería de infraestructura pura. ---
+    "cloud engineer", "site reliability", " sre ", "it engineer",
+    "software engineer", "qa engineer", "quality assurance engineer",
+    "qa automation", "automation qa", "test automation", "automation tester",
+    "mobile automation", "mobile engineer", "backend engineer", "frontend engineer",
+    "full stack", "fullstack", "devops engineer", "platform engineer",
+    "systems engineer", "infrastructure engineer",
+    "machine learning engineer", "mlops", "computer vision",
+    "llm application engineer",
+    # --- Categoría A (Sesión 11): retail / logística.
+    # Nada cubría esto — "Food store supervisor" y "Distribution Centers"
+    # (Ulta) pasaron limpio con razones de "operations" genérico. ---
+    "distribution center", "warehouse", "store supervisor",
+    "retail supervisor", "retail store",
     # --- Categoría A (Capa 3.2): roles colados por sigla o campo ajeno.
     # La IA los vendía con "the bridge is learnable" aunque son otro campo. ---
     "csm", "customer success",     # Customer Success (se colaba por la sigla)
