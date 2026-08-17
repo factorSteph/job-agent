@@ -2,6 +2,22 @@ import feedparser
 import requests
 import os
 from dotenv import load_dotenv
+
+# NUEVO ronda 4 — load_dotenv() tiene que correr ANTES de importar perfiles,
+# porque perfiles.py lee os.environ["ESTEBAN_EMAIL"] apenas se importa
+# (a nivel de módulo, no dentro de una función). Si esto corriera después,
+# localmente reventaría con KeyError aunque el .env sí tenga la variable.
+load_dotenv()
+
+from perfiles import PERFILES
+
+# NUEVO (Sesión 11) — un motor, dos moldes. La variable de entorno PERFIL
+# decide qué molde cargar (STEPH o ESTEBAN). Si no se define, corre STEPH
+# por default (así los comandos locales de siempre no se rompen).
+nombre_perfil = os.environ.get("PERFIL", "STEPH")
+perfil = PERFILES[nombre_perfil]
+print("=== Corriendo perfil:", perfil["nombre"], "===")
+
 regiones_buenas = ["worldwide", "americas", "latam", "cst", "utc-6"]
 
 # ============================================================
@@ -119,6 +135,61 @@ def traducir_remoteok(puesto):
 
     return ficha
 
+def traducir_getonboard(puesto):
+    # NUEVO (Sesión 11) — Paso 4 adelantado. Board LATAM, categorías
+    # 'operations-management' y 'hr'. Reconocimiento hecho en vivo con
+    # explorar.py antes de escribir esto (regla de Sesión 1: nunca filtrar
+    # data que no viste).
+    #
+    # 'remote_modality' es un campo de 4 valores reales, mucho más honesto
+    # que el 'region' de WWR: fully_remote, remote_local, hybrid, no_remote.
+    # hybrid/no_remote piden presencia física -> descarte duro, sin duda.
+    # remote_local es el gris (puede ser LATAM entero o un solo país; el
+    # campo 'countries' no distingue, siempre dice ['Remote']) -> se deja
+    # pasar a la IA en vez de matar a ciegas, mismo principio costo-asimétrico
+    # de siempre. fully_remote -> pasa limpio.
+    a = puesto["attributes"]
+
+    modalidad = a.get("remote_modality", "")
+    paises = a.get("countries", [])
+
+    if modalidad == "fully_remote":
+        restriccion = []
+    elif modalidad == "remote_local":
+        restriccion = []
+    elif "Costa Rica" in paises:
+        # NUEVO (Sesión 11, ronda 3) — regla confirmada por Steph, aplica a
+        # los dos perfiles (motor compartido): una empresa LOCAL de Costa
+        # Rica con modalidad híbrida o presencial SÍ se acepta, aunque no
+        # sea remota. A diferencia de 'remote_local' (dato ambiguo, país
+        # real desconocido), acá 'countries' SÍ trae el país real para
+        # hybrid/no_remote — por eso solo entra por esta rama si dice
+        # explícitamente "Costa Rica", no un "Remote" genérico.
+        restriccion = []
+    else:
+        restriccion = ["fuera"]
+
+    # 'company' llega expandido (pedido con expand[]=company) anidado en
+    # attributes.company.data.attributes.name — NO en un bloque 'included'
+    # aparte como el JSON:API típico. Si algún día el expand falla,
+    # empresa cae a "sin_dato" en vez de romper el programa.
+    empresa_data = a.get("company", {})
+    empresa_data = empresa_data.get("data", {}) if isinstance(empresa_data, dict) else {}
+    empresa_attrs = empresa_data.get("attributes", {}) if isinstance(empresa_data, dict) else {}
+    empresa = empresa_attrs.get("name", "sin_dato")
+
+    ficha = {
+        "titulo": a["title"],
+        "empresa": empresa,
+        "url": puesto["links"]["public_url"],
+        "texto": a.get("description", ""),
+        "board": "GetOnBoard",
+        "restriccion_pais": restriccion,
+        "categorias": [a.get("category_name", "sin_dato")]
+    }
+
+    return ficha
+
 
 # ============================================================
 # BLOQUE 1: traer y traducir los seis boards a UNA bolsa común
@@ -146,7 +217,15 @@ for puesto in feed.entries:
 
 # Himalayas (con paginación, con tope)
 offset = 0
-tope_himalayas = 2000
+# NUEVO (Sesión 11, ronda 4) — el techo estaba en 2000 y las corridas
+# reales venían pegando cerca (~1900 y algo). Eso es la señal de que el
+# 'while' probablemente estaba topando con el techo en vez de terminar
+# solo porque Himalayas ya no tenía más — y el código de antes NUNCA
+# avisaba cuál de las dos cosas pasó. Un silencio exactamente del tipo que
+# más cuesta (Sesión 1: "los filtros que rechazan sin avisar por qué son
+# peores que no tener filtro"). Se sube el techo Y se agrega el aviso
+# explícito, para que esto deje de ser una sospecha y pase a ser un dato.
+tope_himalayas = 5000
 
 while offset < tope_himalayas:
     url_himalayas = "https://himalayas.app/jobs/api?limit=20&offset=" + str(offset)
@@ -155,12 +234,18 @@ while offset < tope_himalayas:
     lote = datos["jobs"]
 
     if lote == []:
+        print("Himalayas: terminó solo, no chocó con el techo. Offset final:", offset)
         break
 
     for puesto in lote:
         agregar_si_nueva(traducir_himalayas(puesto))
 
     offset = offset + 20
+else:
+    # NUEVO — este 'else' de un while solo corre si el while terminó por
+    # la condición (offset >= tope_himalayas), NUNCA si terminó por 'break'.
+    # O sea: si esto imprime, es porque SÍ chocamos con el techo real.
+    print("⚠️ Himalayas: CHOCÓ CON EL TECHO de", tope_himalayas, "— probablemente hay más puestos sin traer. Subir el techo de nuevo.")
 
 # Remotive (una sola página, trae ~lo del día)
 url_remotive = "https://remotive.com/api/remote-jobs"
@@ -191,108 +276,39 @@ datos = respuesta.json()
 for puesto in datos[1:]:
     agregar_si_nueva(traducir_remoteok(puesto))
 
+# Get on Board (NUEVO Sesión 11 — Paso 4 adelantado). Board LATAM con API
+# pública real, sin key. Solo dos categorías: operations-management y hr
+# (donde Steph pidió mirar también people ops / mejora de procesos dentro
+# de HR). expand[]=company trae el nombre de empresa anidado.
+# DEUDA anotada: muchos títulos acá vienen en español ("Analista Contable",
+# "Ingeniero/a de Procesos") y titulos_no es una lista en inglés — un título
+# en español que debería morir puede colarse hoy. Pendiente para otra sesión.
+categorias_getonboard = ["operations-management", "hr"]
+for categoria_gob in categorias_getonboard:
+    url_getonboard = (
+        "https://www.getonbrd.com/api/v0/categories/" + categoria_gob +
+        "/jobs?per_page=100&lang=en&expand[]=company"
+    )
+    respuesta = requests.get(url_getonboard)
+    datos = respuesta.json()
+    for puesto in datos.get("data", []):
+        agregar_si_nueva(traducir_getonboard(puesto))
+
 # ============================================================
 # BLOQUE 2: filtrar la bolsa entera (los seis boards juntos)
 # ============================================================
 
-sospechosos = ["us only", "us based", "usa", "united states", "u.s.", "w2"]
+sospechosos = perfil["sospechosos"]
 
-# NUEVO (Capa 3.1) — PIEZA 1: filtro de título por ROL.
-# Corre para los seis boards por igual, no depende de categorías.
-# Rechaza los NO conocidos (Categoría A: áreas que no son lo tuyo;
-# Categoría C: pasantías/entry-level). Es barato: mata antes de gastar IA.
-titulos_no = [
-    # --- Categoría A: áreas que no son lo tuyo ---
-    # 'customer ' (con espacio) es amplio a propósito: cualquier título que
-    # lidere con Customer casi seguro es servicio/soporte/CX, tu NO duro.
-    "customer ",
-    "advertising", "marketing",
-    "it support", "it maintenance", "help desk", "helpdesk", "service desk",
-    "security engineer", "web developer", "web development",
-    "ai enablement", "ai strategy", "ai transformation",
-    # --- Categoría A (Sesión 11): ingeniería genérica de software/infra.
-    # Se colaban con razones tipo "aligns with her operations focus" solo
-    # porque el título dice "automation" o "engineer" en algún lado.
-    # OJO: NO se pone "automation engineer" suelto — mataría matches buenos
-    # (AI Integration & Automation, Automation Specialist). Se apunta a las
-    # combinaciones específicas que salieron hoy (QA/test/mobile automation
-    # de software) y a ingeniería de infraestructura pura. ---
-    "cloud engineer", "site reliability", " sre ", "it engineer",
-    "software engineer", "qa engineer", "quality assurance engineer",
-    "qa automation", "automation qa", "test automation", "automation tester",
-    "mobile automation", "mobile engineer", "backend engineer", "frontend engineer",
-    "full stack", "fullstack", "devops engineer", "platform engineer",
-    "systems engineer", "infrastructure engineer",
-    "machine learning engineer", "mlops", "computer vision",
-    "llm application engineer",
-    # --- Categoría A (Sesión 11): retail / logística.
-    # Nada cubría esto — "Food store supervisor" y "Distribution Centers"
-    # (Ulta) pasaron limpio con razones de "operations" genérico. ---
-    "distribution center", "warehouse", "store supervisor",
-    "retail supervisor", "retail store",
-    # --- Categoría A (Capa 3.2): roles colados por sigla o campo ajeno.
-    # La IA los vendía con "the bridge is learnable" aunque son otro campo. ---
-    "csm", "customer success",     # Customer Success (se colaba por la sigla)
-    "gtm", "go-to-market",         # go-to-market = ventas/marketing
-    "hubspot",                     # herramienta de marketing/CRM
-    "data labeler", "data annotator", "data annotation",  # trabajo por pieza
-    "ai trainer",                  # anotación/entrenamiento por pieza
-    "scrum master",                # no es el rol que busca
-    # --- Categoría A (Capa 3.3): FINANZAS/CONTABILIDAD = campo ajeno.
-    # OJO: payroll SÍ es su campo (viene de ahí). Estos NO: son finanzas pura. ---
-    "accounts payable", "accounts receivable", "accountant",
-    "investment banking", "treasury", "controller", "fp&a",
-    "financial analyst", "bookkeep",
-    # --- Categoría A (Capa 3.3): títulos de fábrica de anotación/entrenamiento
-    # de IA (micro1 y similares publican decenas con títulos "expert/specialist"
-    # que en realidad son trabajo por pieza para entrenar modelos). ---
-    "domain expert", "domain specialist", "ai trainer", "competitive coder",
-    "data entry", "data annotation", "annotator",
-    # NOTA: 'solutions'/'solution engineer' se dejó FUERA a propósito:
-    # vive en dos mundos (presales ajeno vs. Solution Engineer @ UiPath = RPA,
-    # que sí es su campo). Un filtro de string no distingue contexto; que la
-    # IA / la validación manual decidan esos.
-    # --- Categoría C: pasantías / entry-level ---
-    "intern", "internship", "werkstudent", "trainee",
-    "office assistant", "entry level", "entry-level"
-]
+# NUEVO (Sesión 11) — PIEZA 1: filtro de título por ROL, ahora viene del
+# perfil cargado arriba. Corre para los siete boards por igual.
+titulos_no = perfil["titulos_no"]
 
-# NUEVO (Capa 3.3) — lista negra de EMPRESAS-fábrica. Algunas empresas publican
-# decenas de pseudo-puestos (anotación/entrenamiento de IA por pieza) con títulos
-# creativos que se cuelan por título. Se matan por empresa, no por título.
-# Solo actúa en boards que traen 'empresa' (Himalayas, Jobicy, Remotive, RemoteOK,
-# Arbeitnow); WWR manda 'sin_dato' y ahí no aplica. Crece con la experiencia,
-# igual que titulos_no. micro1 NO se metió todavía: primero medimos cuántos
-# sobreviven al prompt endurecido antes de usar el instrumento más brutal.
-empresas_no = [
-    "dataannotation",
-    "micro1",           # fábrica de entrenamiento de modelos: publica decenas
-                        # de pseudo-puestos que se disfrazan con vocabulario de
-                        # ops/automation. Confirmado por su propio reclutamiento
-                        # ("leveraging your expertise to train AI models").
-]
+empresas_no = perfil["empresas_no"]
 
-# NUEVO (Capa 3.1) — 'junior' se rechaza SOLO pegado a roles administrativos,
-# no como palabra suelta (un "junior automation" sí puede llegar a la IA).
-titulos_no_junior = [
-    "junior assistant", "junior analyst", "junior coordinator",
-    "junior office", "junior administrative", "junior admin",
-    "junior clerk", "junior support"
-]
+titulos_no_junior = perfil["titulos_no_junior"]
 
-categorias_buenas = [
-    "automation", "ai-automation", "ai-workflow", "workflow",
-    "process-automation", "orchestration", "integration", "rpa",
-    "agent", "no-code", "low-code",
-    "operations", "operational", "process-improvement",
-    "process-optimization", "business-process", "continuous-improvement",
-    "operational-excellence", "lean", "six-sigma", "kaizen",
-    "people-operations", "people-leadership", "coaching", "mentoring",
-    "talent-development", "team-lead", "operations-manager",
-    "shared-services", "program-manager", "project-manager",
-    "change-management",
-    "program management", "project management"
-]
+categorias_buenas = perfil["categorias_buenas"]
 sobrevivientes = []
 murio_titulo = 0          # US-only (geo)
 murio_titulo_rol = 0      # NUEVO (Capa 3.1): rol que no es lo tuyo / pasantía
@@ -417,72 +433,9 @@ if len(sobrevivientes) > 0:
 # BLOQUE 5 (Capa 3): la IA juzga
 # ============================================================
 
-load_dotenv()
 api_key = os.environ["OPENAI_API_KEY"]
-
-# --- El briefing permanente (SOP en la pared) ---
-instrucciones = """You are a screening assistant for Steph, a job seeker. You read ONE job posting and decide SEND or SKIP. You are the first filter before she looks at it.
-
-# HOW TO DECIDE — run these steps IN ORDER. Stop at the first one that fires.
-
-STEP 1 — WRONG FIELD? If the role's core function is in a different field, decide SKIP immediately. Do NOT reason about learnable tools or short bridges. These fields are all SKIP no matter how learnable they look:
-- Customer support / success / service / experience (CX)
-- Sales, presales, go-to-market (GTM), "new logo", account executive, solutions selling
-- Marketing / advertising / growth / SEO / tracking / analytics-for-marketing
-- Recruiting / talent acquisition
-- Classic HR: HR Business Partner, HR Manager, generalist HR
-- IT support / help desk / IT maintenance
-- Data labeling / data annotation / AI training-by-example (piece work). This INCLUDES "domain expert" / "specialist" roles that are really about supplying knowledge to train an AI model by piece (finance domain expert, healthcare specialist, competitive coder, investment banking expert). If the real job is "lend your expertise to train a model", it is piece work — SKIP.
-- Finance and accounting as the core: accounts payable, accounts receivable, accountant, bookkeeping, treasury, investment banking, financial analyst, FP&A, controller. NOTE: payroll operations IS her field (she came from there); do not confuse payroll with general accounting/AP/AR.
-- Pure software engineering, security engineering, web development, DevOps, data engineering, data science, ML/AI research engineering (Member of Technical Staff, Research Engineer, Applied Scientist). These are long-runway technical roles, not her operations/automation field, even when the posting says "automation".
-A role in the wrong field is a SKIP even if it names a tool she knows (Salesforce, HubSpot, Copilot). The tool does not save a wrong-field role.
-
-STEP 2 — HARD BARRIER? If STEP 1 did not fire, SKIP if any of these is true:
-- The role hard-REQUIRES a certification or degree she does not hold as a strict, non-negotiable prerequisite (her credentials are listed below).
-- The role rests on a LONG bridge: a deep technical foundation that takes months or years to build (software dev from zero, CS degree required, senior coding in a language she does not use, deep finance/accounting as the core).
-- GEOGRAPHY: the role hard-requires residency somewhere she is not, or names a non-remote locale (US-only, "London on-site", "must reside in Brazil", a German Werkstudent role). She is in Costa Rica and needs remote-global or LATAM-open roles. If it names a country/city as a requirement and is not clearly remote-global, SKIP.
-- STRUCTURAL JUNK: you cannot tell what the role even is (empty/generic title, "Expression of Interest", "Speculative CV", no real description). Not "unsure if it fits" — "cannot tell what it is." That is always SKIP.
-
-STEP 3 — ONLY IF IT SURVIVED STEPS 1 AND 2: decide SEND only if the CORE of the role is genuinely operations, process, or automation work — the kind of thing in the GOOD MATCH list below. The default here is SKIP. Flip to SEND only when the role's main purpose (not a side mention) is building/running automation, redesigning processes, or leading operations. A posting that merely CONTAINS the words "AI", "automation", "workflow", or "operations" is NOT enough — many wrong-field roles sprinkle those words. Ask: "is the PRIMARY job operations/process/automation, like her bullseye examples?" If yes, SEND. If it is some other job that happens to mention those words, or you are unsure what the core actually is, SKIP.
-Do NOT send a role just because a missing tool is "learnable" — that only matters AFTER you have confirmed the core is in her field. "Learnable tool" is never a reason to SEND on its own.
-The asymmetry note (a missed job is lost forever) still matters, but experience shows the bigger problem is a flood of wrong-field roles wearing automation vocabulary. So at STEP 3 the rule is: when genuinely unsure whether the CORE is her field, SKIP.
-
-# THE BRIDGE RULE (this is what you keep getting wrong)
-A "short bridge" is a missing TOOL inside a role that is ALREADY in her field. It is NEVER a way into a different field. Never justify a SEND by saying the field is "learnable." Learning HubSpot does not make a marketing role fit. Learning a CRM does not make a customer-success role fit. The bridge crosses a gap in tools, never a gap in career direction.
-
-# WHO STEPH IS
-Operations and automation leader, ~a decade running HR shared-services and payroll operations across Latin America and North America. Founded and scaled a regional operations hub, held service levels above 95% across 8 countries. Since early 2026 she builds automation end-to-end: Power Automate (Cloud and Desktop), Copilot Studio, Claude Code, agentic workflow design, Git/GitHub, spec-driven development. Learning Python by building a real project. Her lifelong pattern: enter a domain WITHOUT the formal credential, build the capability by doing, earn the title after. A posting asking for experience she is actively building is NOT an automatic disqualifier.
-
-Her credentials (for STEP 2): Bachelor's in Public Administration (UCR), NLP Master (IANLP), Storytelling & Persuasion (INCAE), Certified Project Practitioner (GE360), Lean Six Sigma Green Belt in progress. If a role hard-requires a credential NOT on this list, that counts against it. If it IS on this list, she has it.
-
-# WHAT A GOOD MATCH LOOKS LIKE (STEP 3 territory)
-Operations / process / automation with building at the center: People Ops AI & Automation Manager, AI Process Operations Manager, Operations & Automation Lead, Workflow / Process Automation Specialist, Process Improvement / Operational Excellence Lead, RevOps or business-ops roles where automation is central. Remote-global or LATAM-open.
-
-# CALIBRATION EXAMPLES
-SEND — Enterprise AI Workflow / Automation Specialist: designs AI-powered workflows, process optimization, change management. Her exact bullseye. Missing an AI platform is a short bridge.
-SEND — AI Workflow Engineer on a business background (names n8n): building automation is the core.
-SEND — Operational Excellence / Process Improvement Lead: process redesign, Lean Six Sigma, Kaizen, change management.
-SKIP — Customer Success Manager "CRM is learnable": wrong field (STEP 1), tool does not save it.
-SKIP — Founding GTM Engineer "missing tools are short bridges": GTM is sales, wrong field (STEP 1).
-SKIP — HubSpot Implementation Specialist: HubSpot is marketing/CRM, wrong field (STEP 1).
-SKIP — Staff Solutions Architect, New Logo: presales sales, wrong field (STEP 1).
-SKIP — Data Labeler / AI Trainer: piece work below her level, wrong field (STEP 1).
-SKIP — Accounts Payable Specialist "missing Bill.com is learnable": finance is wrong field (STEP 1); the learnable tool does not save it.
-SKIP — Investment Banking Expert / AI Finance Domain Expert: piece work training a model with domain knowledge, wrong field (STEP 1).
-SKIP — Member of Technical Staff, Frontier AI / Research Engineering: ML research engineering, long-runway technical field (STEP 1), not her operations/automation work.
-SKIP — Personal Assistant / Data Entry Administrator "in-field operations": admin/piece work, NOT operations/process/automation core. Mentioning "operations" does not make it her field (STEP 3 default SKIP).
-SKIP — DevOps / Data Engineer "Kubernetes is learnable": long-runway technical field (STEP 1); learnable tool is irrelevant when the field is wrong.
-SKIP — Senior Software Engineer / Security Engineer, CS degree + senior coding: long bridge (STEP 2).
-SKIP — "Expression of Interest", no real description: structural junk (STEP 2).
-SEND — Business Operations Partner / Chief Operating Officer where the CORE is running/redesigning operations: her field, send.
-
-# CONSISTENCY RULE
-Your DECISION must match your REASON. If your reason names a wrong field, a hard barrier, a long bridge, junk, or a geo restriction, you MUST decide SKIP — even if the role also mentions a tool she knows. Never let the decision contradict the reason.
-
-# OUTPUT FORMAT
-Respond with exactly two lines and nothing else:
-DECISION: SEND or SKIP
-REASON: one short sentence, max 15 words, plain and specific. Name which STEP fired if SKIP."""
+# --- El briefing permanente (SOP en la pared) — viene del perfil cargado ---
+instrucciones = perfil["instrucciones"]
 
 # --- Capa 3: el juez evalúa las fichas y guarda las aprobadas ---
 aprobados = []
@@ -573,7 +526,8 @@ import smtplib
 from email.message import EmailMessage
 
 clave_gmail = os.environ["GMAIL_APP_PASSWORD"]
-mi_correo = "steph.jimenezcor@gmail.com"
+mi_correo = "steph.jimenezcor@gmail.com"  # remitente: siempre tu Gmail autenticado
+correo_destino = perfil["correo_destino"]  # NUEVO (Sesión 11) — destinatario por perfil
 
 if aprobados == []:
     print("---")
@@ -586,9 +540,9 @@ else:
         cuerpo = cuerpo + str(numero) + ". " + ficha["titulo"] + " | " + ficha["razon"] + " Link: " + ficha["url"] + "\n\n"
 
     correo = EmailMessage()
-    correo["Subject"] = "Job Agent: " + str(len(aprobados)) + " puestos encontrados"
+    correo["Subject"] = "Job Agent (" + perfil["nombre"] + "): " + str(len(aprobados)) + " puestos encontrados"
     correo["From"] = mi_correo
-    correo["To"] = mi_correo
+    correo["To"] = correo_destino
     correo.set_content(cuerpo)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as servidor:

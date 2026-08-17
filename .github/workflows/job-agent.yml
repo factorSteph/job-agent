@@ -8,6 +8,12 @@ on:
 jobs:
   correr-agente:
     runs-on: ubuntu-latest
+    strategy:
+      # NUEVO (Sesión 11) — un motor, dos moldes. Este job corre dos veces,
+      # una por perfil, cada una con su propio PERFIL como variable de
+      # entorno. Mismo checkout, mismo requirements.txt, mismo script.
+      matrix:
+        perfil: [STEPH, ESTEBAN]
     steps:
       - uses: actions/checkout@v4
 
@@ -19,5 +25,7 @@ jobs:
 
       - run: python buscar_empleos.py
         env:
+          PERFIL: ${{ matrix.perfil }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ESTEBAN_EMAIL: ${{ secrets.ESTEBAN_EMAIL }}
