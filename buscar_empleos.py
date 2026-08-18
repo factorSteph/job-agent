@@ -18,6 +18,31 @@ nombre_perfil = os.environ.get("PERFIL", "STEPH")
 perfil = PERFILES[nombre_perfil]
 print("=== Corriendo perfil:", perfil["nombre"], "===")
 
+import time
+
+def pedir_json(url, board_nombre, headers=None, timeout=15):
+    """
+    SOP de red: pide una URL y la lee como JSON, sin reventar el script
+    si algo sale mal (respuesta vacía, timeout, servidor caído, rate limit).
+    Devuelve el diccionario/lista si salió bien, o None si falló —
+    y en ese caso imprime por qué, para que nunca sea una caja negra.
+    """
+    try:
+        respuesta = requests.get(url, headers=headers, timeout=timeout)
+    except requests.exceptions.RequestException as e:
+        print("⚠️", board_nombre, "— falló la conexión:", type(e).__name__)
+        return None
+
+    if respuesta.status_code != 200:
+        print("⚠️", board_nombre, "— HTTP", respuesta.status_code, "en vez de 200")
+        return None
+
+    try:
+        return respuesta.json()
+    except requests.exceptions.JSONDecodeError:
+        print("⚠️", board_nombre, "— la respuesta no era JSON válido (posible rate limit o página vacía)")
+        return None
+
 regiones_buenas = ["worldwide", "americas", "latam", "cst", "utc-6"]
 
 # ============================================================
@@ -217,20 +242,16 @@ for puesto in feed.entries:
 
 # Himalayas (con paginación, con tope)
 offset = 0
-# NUEVO (Sesión 11, ronda 4) — el techo estaba en 2000 y las corridas
-# reales venían pegando cerca (~1900 y algo). Eso es la señal de que el
-# 'while' probablemente estaba topando con el techo en vez de terminar
-# solo porque Himalayas ya no tenía más — y el código de antes NUNCA
-# avisaba cuál de las dos cosas pasó. Un silencio exactamente del tipo que
-# más cuesta (Sesión 1: "los filtros que rechazan sin avisar por qué son
-# peores que no tener filtro"). Se sube el techo Y se agrega el aviso
-# explícito, para que esto deje de ser una sospecha y pase a ser un dato.
 tope_himalayas = 5000
 
 while offset < tope_himalayas:
     url_himalayas = "https://himalayas.app/jobs/api?limit=20&offset=" + str(offset)
-    respuesta = requests.get(url_himalayas)
-    datos = respuesta.json()
+    datos = pedir_json(url_himalayas, "Himalayas (offset " + str(offset) + ")")
+
+    if datos is None:
+        print("Himalayas: se corta la paginación en offset", offset, "— se conserva lo ya traído.")
+        break
+
     lote = datos["jobs"]
 
     if lote == []:
@@ -241,58 +262,59 @@ while offset < tope_himalayas:
         agregar_si_nueva(traducir_himalayas(puesto))
 
     offset = offset + 20
+    time.sleep(0.2)  # pausa chica para no gatillar rate limiting con ~250 pedidos seguidos
 else:
-    # NUEVO — este 'else' de un while solo corre si el while terminó por
-    # la condición (offset >= tope_himalayas), NUNCA si terminó por 'break'.
-    # O sea: si esto imprime, es porque SÍ chocamos con el techo real.
     print("⚠️ Himalayas: CHOCÓ CON EL TECHO de", tope_himalayas, "— probablemente hay más puestos sin traer. Subir el techo de nuevo.")
 
 # Remotive (una sola página, trae ~lo del día)
 url_remotive = "https://remotive.com/api/remote-jobs"
-respuesta = requests.get(url_remotive)
-datos = respuesta.json()
-for puesto in datos["jobs"]:
-    agregar_si_nueva(traducir_remotive(puesto))
+datos = pedir_json(url_remotive, "Remotive")
+if datos:
+    for puesto in datos["jobs"]:
+        agregar_si_nueva(traducir_remotive(puesto))
 
 # Arbeitnow (una sola página, ~110 puestos)
 url_arbeitnow = "https://www.arbeitnow.com/api/job-board-api"
-respuesta = requests.get(url_arbeitnow)
-datos = respuesta.json()
-for puesto in datos["data"]:
-    agregar_si_nueva(traducir_arbeitnow(puesto))
+datos = pedir_json(url_arbeitnow, "Arbeitnow")
+if datos:
+    for puesto in datos["data"]:
+        agregar_si_nueva(traducir_arbeitnow(puesto))
 
 # Jobicy (una sola página, ~100 puestos)
 url_jobicy = "https://jobicy.com/api/v2/remote-jobs"
-respuesta = requests.get(url_jobicy)
-datos = respuesta.json()
-for puesto in datos["jobs"]:
-    agregar_si_nueva(traducir_jobicy(puesto))
+datos = pedir_json(url_jobicy, "Jobicy")
+if datos:
+    for puesto in datos["jobs"]:
+        agregar_si_nueva(traducir_jobicy(puesto))
 
 # RemoteOK (lista pelada, con metadata en [0] que hay que saltar)
 url_remoteok = "https://remoteok.com/api"
 headers = {"User-Agent": "job-alert-agent"}
-respuesta = requests.get(url_remoteok, headers=headers)
-datos = respuesta.json()
-for puesto in datos[1:]:
-    agregar_si_nueva(traducir_remoteok(puesto))
+datos = pedir_json(url_remoteok, "RemoteOK", headers=headers)
+if datos:
+    for puesto in datos[1:]:
+        agregar_si_nueva(traducir_remoteok(puesto))
 
-# Get on Board (NUEVO Sesión 11 — Paso 4 adelantado). Board LATAM con API
-# pública real, sin key. Solo dos categorías: operations-management y hr
-# (donde Steph pidió mirar también people ops / mejora de procesos dentro
-# de HR). expand[]=company trae el nombre de empresa anidado.
-# DEUDA anotada: muchos títulos acá vienen en español ("Analista Contable",
-# "Ingeniero/a de Procesos") y titulos_no es una lista en inglés — un título
-# en español que debería morir puede colarse hoy. Pendiente para otra sesión.
+# Get on Board (dos categorías, cada una blindada por separado —
+# si "hr" falla, "operations-management" igual puede pasar)
 categorias_getonboard = ["operations-management", "hr"]
 for categoria_gob in categorias_getonboard:
     url_getonboard = (
         "https://www.getonbrd.com/api/v0/categories/" + categoria_gob +
         "/jobs?per_page=100&lang=en&expand[]=company"
     )
-    respuesta = requests.get(url_getonboard)
-    datos = respuesta.json()
-    for puesto in datos.get("data", []):
-        agregar_si_nueva(traducir_getonboard(puesto))
+    datos = pedir_json(url_getonboard, "GetOnBoard (" + categoria_gob + ")")
+    if datos:
+        for puesto in datos.get("data", []):
+            agregar_si_nueva(traducir_getonboard(puesto))
+
+print("--- Resumen de la traída (Bloque 1) ---")
+conteo_por_board = {}
+for ficha in fichas:
+    b = ficha["board"]
+    conteo_por_board[b] = conteo_por_board.get(b, 0) + 1
+for board_nombre, cantidad in conteo_por_board.items():
+    print(" ", board_nombre, "-", cantidad)
 
 # ============================================================
 # BLOQUE 2: filtrar la bolsa entera (los seis boards juntos)
