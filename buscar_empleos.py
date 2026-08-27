@@ -71,7 +71,7 @@ def traducir_himalayas(puesto):
         "texto": puesto["description"],
         "board": "Himalayas",
         "restriccion_pais": puesto["locationRestrictions"],
-        "categorias": puesto["categories"]
+        "categorias": puesto.get("categories") or ["sin_dato"]
     }
 
     return ficha
@@ -142,7 +142,7 @@ def traducir_jobicy(puesto):
         "texto": puesto["jobDescription"],
         "board": "Jobicy",
         "restriccion_pais": restriccion,
-        "categorias": puesto["jobIndustry"]
+        "categorias": puesto.get("jobIndustry") or ["sin_dato"]
     }
 
     return ficha

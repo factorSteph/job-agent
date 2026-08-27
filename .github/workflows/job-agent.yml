@@ -12,6 +12,7 @@ jobs:
       # NUEVO (Sesión 11) — un motor, dos moldes. Este job corre dos veces,
       # una por perfil, cada una con su propio PERFIL como variable de
       # entorno. Mismo checkout, mismo requirements.txt, mismo script.
+      fail-fast: false
       matrix:
         perfil: [STEPH, ESTEBAN]
     steps:
