@@ -70,14 +70,14 @@ def traducir_himalayas(puesto):
         "url": puesto["applicationLink"],
         "texto": puesto["description"],
         "board": "Himalayas",
-        "restriccion_pais": puesto["locationRestrictions"],
+        "restriccion_pais": puesto.get("locationRestrictions") or ["sin_dato"],
         "categorias": puesto.get("categories") or ["sin_dato"]
     }
 
     return ficha
 
 def traducir_remotive(puesto):
-    texto_region = puesto["candidate_required_location"].lower()
+    texto_region = (puesto.get("candidate_required_location") or "").lower()
     incluye = False
     for region in regiones_buenas:
         if region in texto_region:
@@ -125,7 +125,7 @@ def traducir_arbeitnow(puesto):
     return ficha
 
 def traducir_jobicy(puesto):
-    texto_geo = puesto["jobGeo"].lower()
+    texto_geo = (puesto.get("jobGeo") or "").lower()
     incluye = False
     for region in regiones_buenas:
         if region in texto_geo:
