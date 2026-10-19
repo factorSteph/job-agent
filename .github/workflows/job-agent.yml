@@ -5,6 +5,12 @@ on:
     - cron: "37 9 * * *"
   workflow_dispatch:
 
+# NUEVO (Oct 2026) — permiso para que la corrida suba vistos_<PERFIL>.json
+# al repo. Efecto secundario a favor: ese commit diario cuenta como
+# actividad, así GitHub ya no desactiva el workflow por 60 días quieto.
+permissions:
+  contents: write
+
 jobs:
   correr-agente:
     runs-on: ubuntu-latest
@@ -13,8 +19,10 @@ jobs:
       # una por perfil, cada una con su propio PERFIL como variable de
       # entorno. Mismo checkout, mismo requirements.txt, mismo script.
       fail-fast: false
+      # Octubre 2026 — solo corre ESTEBAN. Para volver a prender a Steph,
+      # agregar STEPH a la lista: [STEPH, ESTEBAN].
       matrix:
-        perfil: [STEPH, ESTEBAN]
+        perfil: [ESTEBAN]
     steps:
       - uses: actions/checkout@v4
 
@@ -30,3 +38,19 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           ESTEBAN_EMAIL: ${{ secrets.ESTEBAN_EMAIL }}
+
+      # NUEVO (Oct 2026) — guardar la memoria de puestos vistos. Solo corre
+      # si el script terminó bien. El pull --rebase es por si otra corrida
+      # (otro perfil) subió su propio archivo un momento antes.
+      - name: Guardar memoria de vistos
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vistos_${{ matrix.perfil }}.json
+          if git diff --cached --quiet; then
+            echo "Sin cambios en la memoria."
+          else
+            git commit -m "Memoria de vistos (${{ matrix.perfil }})"
+            git pull --rebase
+            git push
+          fi

@@ -1,6 +1,7 @@
 import feedparser
 import requests
 import os
+import sys
 from dotenv import load_dotenv
 
 # NUEVO ronda 4 — load_dotenv() tiene que correr ANTES de importar perfiles,
@@ -227,11 +228,21 @@ fichas = []
 # se vuelve a marcar. Se hace ACÁ, al armar la bolsa, no después: así un
 # duplicado ni siquiera gasta checkpoints ni tokens de IA.
 urls_vistas = set()
+titulos_vistos = set()
+
+def llave_titulo(ficha):
+    # NUEVO (Oct 2026) — el mismo puesto publicado en dos boards trae dos
+    # URLs distintas, así que la URL sola no lo atrapa. Empresa + título,
+    # en minúscula y sin espacios extra, sí.
+    return " ".join((ficha["empresa"] + " | " + ficha["titulo"]).lower().split())
 
 def agregar_si_nueva(ficha):
     if ficha["url"] in urls_vistas:
         return
+    if llave_titulo(ficha) in titulos_vistos:
+        return
     urls_vistas.add(ficha["url"])
+    titulos_vistos.add(llave_titulo(ficha))
     fichas.append(ficha)
 
 # WWR
@@ -431,6 +442,48 @@ print("Murieron por país:", murio_pais)
 print("Pasaron sin categoría útil (le tocan a la IA):", sin_categoria_util)
 
 # ============================================================
+# BLOQUE 3b (NUEVO Oct 2026): memoria entre corridas
+# ============================================================
+# Antes cada corrida arrancaba sin memoria: el mismo puesto se juzgaba (y
+# se mandaba) todos los días mientras siguiera publicado. Ahora cada puesto
+# que la IA juzga queda anotado en vistos_<PERFIL>.json con la fecha, y el
+# workflow sube ese archivo al repo al terminar. Al día siguiente, lo ya
+# visto no vuelve a la IA ni al correo.
+#
+# Se olvida lo anotado hace más de DIAS_MEMORIA días: si un puesto se
+# republica mucho después, vale la pena verlo de nuevo.
+
+import json
+from datetime import date, timedelta
+
+DIAS_MEMORIA = 45
+archivo_vistos = "vistos_" + nombre_perfil + ".json"
+hoy = date.today().isoformat()
+limite = (date.today() - timedelta(days=DIAS_MEMORIA)).isoformat()
+
+try:
+    with open(archivo_vistos, encoding="utf-8") as f:
+        vistos = json.load(f)
+except FileNotFoundError:
+    vistos = {}
+    print("No hay", archivo_vistos, "— primera corrida con memoria, se juzga todo.")
+
+# Fechas ISO (AAAA-MM-DD) se comparan bien como texto.
+vistos = {llave: fecha for llave, fecha in vistos.items() if fecha >= limite}
+
+nuevos = []
+murio_visto = 0
+for ficha in sobrevivientes:
+    if ficha["url"] in vistos or llave_titulo(ficha) in vistos:
+        murio_visto = murio_visto + 1
+        continue
+    nuevos.append(ficha)
+sobrevivientes = nuevos
+
+print("Ya vistos en corridas anteriores (no vuelven a la IA):", murio_visto)
+print("Nuevos de verdad (van a la IA):", len(sobrevivientes))
+
+# ============================================================
 # BLOQUE 4: pesar los sobrevivientes en tokens
 # ============================================================
 
@@ -508,10 +561,31 @@ for i, ficha in enumerate(sobrevivientes[:tope_juez]):
         print("---")
         print("⚠️ [" + str(i + 1) + "/" + str(tope_juez) + "]", ficha["board"], "—", ficha["titulo"])
         print("La IA no devolvió veredicto. HTTP:", respuesta_ia.status_code)
+        # NUEVO (Oct 2026) — imprimir QUÉ dijo OpenAI. Antes solo salía el
+        # HTTP, y un saldo agotado (429 insufficient_quota) se veía igual
+        # que un hipo de red.
+        error_ia = datos_ia.get("error", {}) if isinstance(datos_ia, dict) else {}
+        print("Detalle OpenAI:", error_ia.get("code"), "—", error_ia.get("message"))
         cuenta_error = cuenta_error + 1
+
+        # NUEVO (Oct 2026) — el bug silencioso de septiembre: sin saldo, TODAS
+        # las llamadas fallaban, 0 aprobados, no salía correo, y Actions
+        # marcaba "success" igual. Sin saldo o con la key mala no tiene
+        # sentido seguir: se corta y la corrida sale en ROJO, así GitHub
+        # manda el correo de "Run failed".
+        if error_ia.get("code") in ("insufficient_quota", "invalid_api_key", "model_not_found"):
+            print("❌ Error fatal de OpenAI (" + str(error_ia.get("code")) + "). Se corta la corrida.")
+            # Lo aprobado antes del corte no se mandó, así que no se guarda
+            # la memoria: mañana se vuelve a juzgar y sí llega al correo.
+            sys.exit(1)
         continue
 
     veredicto = datos_ia["choices"][0]["message"]["content"]
+
+    # NUEVO (Oct 2026) — memoria: solo se anota lo que la IA SÍ juzgó. Lo que
+    # falló por red o saldo se vuelve a intentar mañana.
+    vistos[ficha["url"]] = hoy
+    vistos[llave_titulo(ficha)] = hoy
 
     print("---")
     print("[" + str(i + 1) + "/" + str(tope_juez) + "]", ficha["board"], "—", ficha["titulo"])
@@ -539,6 +613,13 @@ print("SEND (aprobadas):", cuenta_send)
 print("SKIP (descartadas):", cuenta_skip)
 print("Errores de IA:", cuenta_error)
 print("Fichas en la lista de aprobados:", len(aprobados))
+
+# NUEVO (Oct 2026) — segunda red: si la mitad o más de los juicios fallaron
+# (por la razón que sea), la corrida no es confiable. Sale en ROJO en vez
+# de "success" con cero correos.
+if tope_juez > 0 and cuenta_error * 2 >= tope_juez:
+    print("❌ Fallaron", cuenta_error, "de", tope_juez, "juicios. La corrida se marca como fallida.")
+    sys.exit(1)
 
 # ============================================================
 # BLOQUE 7 (Capa 4): despachar el correo
@@ -573,3 +654,10 @@ else:
 
     print("---")
     print("Correo despachado con", len(aprobados), "puestos.")
+
+# NUEVO (Oct 2026) — guardar la memoria al final, DESPUÉS del correo: si el
+# correo falla, el script revienta antes de llegar acá y lo aprobado no
+# queda marcado como visto (se vuelve a intentar mañana).
+with open(archivo_vistos, "w", encoding="utf-8") as f:
+    json.dump(vistos, f, ensure_ascii=False, indent=0, sort_keys=True)
+print("Memoria guardada en", archivo_vistos, "—", len(vistos), "llaves.")
