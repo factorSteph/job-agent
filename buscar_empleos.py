@@ -331,6 +331,20 @@ for board_nombre, cantidad in conteo_por_board.items():
 # BLOQUE 2: filtrar la bolsa entera (los seis boards juntos)
 # ============================================================
 
+import re
+
+# NUEVO (Issue #1, gracias a @mattabate) — antes cada palabra de las listas
+# se buscaba como pedazo de texto suelto ("intern" in titulo), así que
+# "intern" mataba "International Payroll Manager" e "Internal Process Lead",
+# "usa" mataba "Usability" y "it support" mataba "Audit Support".
+# Ahora la palabra tiene que aparecer completa: ni pegada a una letra o
+# número antes, ni después. Se usan (?<!\w) y (?!\w) en vez de \b para que
+# también funcionen entradas con puntuación o espacios ("u.s.", "fp&a",
+# "customer ", " sre ").
+def calza(palabra, titulo):
+    patron = r"(?<!\w)" + re.escape(palabra.strip()) + r"(?!\w)"
+    return re.search(patron, titulo) is not None
+
 sospechosos = perfil["sospechosos"]
 
 # NUEVO (Sesión 11) — PIEZA 1: filtro de título por ROL, ahora viene del
@@ -361,10 +375,10 @@ for ficha in fichas:
     # --- CHECKPOINT 0 (NUEVO): título de ROL prohibido ---
     es_rol_no = False
     for malo in titulos_no:
-        if malo in titulo:
+        if calza(malo, titulo):
             es_rol_no = True
     for malo in titulos_no_junior:
-        if malo in titulo:
+        if calza(malo, titulo):
             es_rol_no = True
 
     if es_rol_no:
@@ -385,7 +399,7 @@ for ficha in fichas:
     # --- CHECKPOINT 1: título sospechoso (geo US) ---
     es_sospechoso = False
     for sospechoso in sospechosos:
-        if sospechoso in titulo:
+        if calza(sospechoso, titulo):
             es_sospechoso = True
 
     if es_sospechoso:

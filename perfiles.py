@@ -30,7 +30,7 @@ STEPH_TITULOS_NO = [
     "scrum master",
     "accounts payable", "accounts receivable", "accountant",
     "investment banking", "treasury", "controller", "fp&a",
-    "financial analyst", "bookkeep",
+    "financial analyst", "bookkeeper", "bookkeeping",
     "domain expert", "domain specialist", "competitive coder",
     "data entry",
     "intern", "internship", "werkstudent", "trainee",
