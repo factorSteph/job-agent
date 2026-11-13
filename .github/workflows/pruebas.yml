@@ -1,0 +1,26 @@
+name: pruebas
+
+# NUEVO (Nov 2026) — lección del proyecto de Matt: nada se da por bueno sin
+# pasar las pruebas. Corre cada vez que se sube un cambio de código (no con
+# el commit diario de la memoria de vistos) y NO gasta OpenAI ni manda
+# correos: solo revisa los filtros de títulos. Si sale en rojo, el cambio
+# rompió algo; el agente diario sigue corriendo igual.
+
+on:
+  push:
+    paths:
+      - "**.py"
+      - ".github/workflows/pruebas.yml"
+  workflow_dispatch:
+
+jobs:
+  probar-filtros:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m unittest discover -s tests -t . -v

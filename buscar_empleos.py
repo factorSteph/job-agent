@@ -327,33 +327,32 @@ for ficha in fichas:
 for board_nombre, cantidad in conteo_por_board.items():
     print(" ", board_nombre, "-", cantidad)
 
+# NUEVO (Nov 2026) — lección del proyecto de Matt: "un dato que no se pudo
+# leer es un error, no un cero". Antes, si un board se caía, solo quedaba
+# una línea ⚠️ en el log que nadie lee, y si se caían TODOS la corrida
+# salía en verde con 0 puestos (igual que un día sin ofertas). Ahora:
+#   - un board que trajo 0 se anota y se avisa en el correo del día;
+#   - si TODOS trajeron 0, no hay nada que juzgar: la corrida sale en ROJO
+#     y el workflow manda el correo de falla.
+# Estos nombres tienen que ser iguales al "board" de cada traductor.
+boards_esperados = ["WWR", "Himalayas", "Remotive", "Arbeitnow", "Jobicy", "RemoteOK", "GetOnBoard"]
+boards_caidos = [b for b in boards_esperados if conteo_por_board.get(b, 0) == 0]
+if boards_caidos:
+    print("⚠️ Boards que no trajeron NADA hoy:", ", ".join(boards_caidos))
+if len(fichas) == 0:
+    print("❌ Ningún board trajo puestos. Algo está roto (red, APIs). La corrida se marca como fallida.")
+    sys.exit(1)
+
 # ============================================================
 # BLOQUE 2: filtrar la bolsa entera (los seis boards juntos)
 # ============================================================
 
-import re
-
-# NUEVO (Issue #1, gracias a @mattabate) — antes cada palabra de las listas
-# se buscaba como pedazo de texto suelto ("intern" in titulo), así que
-# "intern" mataba "International Payroll Manager" e "Internal Process Lead",
-# "usa" mataba "Usability" y "it support" mataba "Audit Support".
-# Ahora la palabra tiene que aparecer completa: ni pegada a una letra o
-# número antes, ni después. Se usan (?<!\w) y (?!\w) en vez de \b para que
-# también funcionen entradas con puntuación o espacios ("u.s.", "fp&a",
-# "customer ", " sre ").
-def calza(palabra, titulo):
-    patron = r"(?<!\w)" + re.escape(palabra.strip()) + r"(?!\w)"
-    return re.search(patron, titulo) is not None
-
-sospechosos = perfil["sospechosos"]
-
-# NUEVO (Sesión 11) — PIEZA 1: filtro de título por ROL, ahora viene del
-# perfil cargado arriba. Corre para los siete boards por igual.
-titulos_no = perfil["titulos_no"]
+# NUEVO (Nov 2026) — calza(), y los checkpoints 0 y 1 que la usan, se
+# mudaron a filtros.py para que las pruebas en tests/ los puedan revisar.
+# La lógica es la misma de antes (Issue #1: palabras completas).
+from filtros import es_rol_no, es_sospechoso
 
 empresas_no = perfil["empresas_no"]
-
-titulos_no_junior = perfil["titulos_no_junior"]
 
 categorias_buenas = perfil["categorias_buenas"]
 sobrevivientes = []
@@ -372,16 +371,8 @@ for ficha in fichas:
     restriccion = ficha["restriccion_pais"]
     categorias = ficha["categorias"]
 
-    # --- CHECKPOINT 0 (NUEVO): título de ROL prohibido ---
-    es_rol_no = False
-    for malo in titulos_no:
-        if calza(malo, titulo):
-            es_rol_no = True
-    for malo in titulos_no_junior:
-        if calza(malo, titulo):
-            es_rol_no = True
-
-    if es_rol_no:
+    # --- CHECKPOINT 0 (NUEVO): título de ROL prohibido (filtros.py) ---
+    if es_rol_no(titulo, perfil):
         murio_titulo_rol = murio_titulo_rol + 1
         continue
 
@@ -396,13 +387,8 @@ for ficha in fichas:
         murio_empresa = murio_empresa + 1
         continue
 
-    # --- CHECKPOINT 1: título sospechoso (geo US) ---
-    es_sospechoso = False
-    for sospechoso in sospechosos:
-        if calza(sospechoso, titulo):
-            es_sospechoso = True
-
-    if es_sospechoso:
+    # --- CHECKPOINT 1: título sospechoso (geo US) (filtros.py) ---
+    if es_sospechoso(titulo, perfil):
         murio_titulo = murio_titulo + 1
         continue
 
@@ -655,6 +641,10 @@ else:
     # que cada puesto salga con su número y no te pierdas al validar.
     for numero, ficha in enumerate(aprobados, start=1):
         cuerpo = cuerpo + str(numero) + ". " + ficha["titulo"] + " | " + ficha["razon"] + " Link: " + ficha["url"] + "\n\n"
+
+    # NUEVO (Nov 2026) — el aviso de boards caídos llega al correo, no solo al log.
+    if boards_caidos:
+        cuerpo = cuerpo + "---\nOjo: estos boards no trajeron puestos hoy (puede que estén caídos): " + ", ".join(boards_caidos) + "\n"
 
     correo = EmailMessage()
     correo["Subject"] = "Job Agent (" + perfil["nombre"] + "): " + str(len(aprobados)) + " puestos encontrados"

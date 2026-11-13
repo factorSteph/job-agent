@@ -54,3 +54,14 @@ jobs:
             git pull --rebase
             git push
           fi
+
+      # NUEVO (Nov 2026) — lección del proyecto de Matt: una falla le llega a
+      # la persona, no se queda en el log. Solo corre si algún paso de arriba
+      # falló; le manda a Esteban (copia a Steph) el link a esta corrida.
+      - name: Avisar por correo que la corrida falló
+        if: failure()
+        run: python avisar_falla.py
+        env:
+          PERFIL: ${{ matrix.perfil }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ESTEBAN_EMAIL: ${{ secrets.ESTEBAN_EMAIL }}
