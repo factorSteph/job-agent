@@ -491,10 +491,16 @@ import tiktoken
 
 balanza = tiktoken.get_encoding("cl100k_base")
 
+# NUEVO (Nov 2026) — lo que se manda a la IA se corta en este largo (ver
+# Bloque 5). Se pesa ya cortado, para que el total refleje lo que se paga.
+TOPE_CARACTERES = 20000
+
 total_tokens = 0
 
 for ficha in sobrevivientes:
-    texto_a_pesar = ficha["titulo"] + " " + ficha["texto"]
+    if len(ficha["texto"]) > TOPE_CARACTERES:
+        print("✂️ Descripción enorme recortada:", ficha["board"], "—", ficha["titulo"], "(" + str(len(ficha["texto"])) + " caracteres)")
+    texto_a_pesar = ficha["titulo"] + " " + ficha["texto"][:TOPE_CARACTERES]
     tokens_de_esta = len(balanza.encode(texto_a_pesar))
     total_tokens = total_tokens + tokens_de_esta
 
@@ -523,7 +529,13 @@ tope_juez = len(sobrevivientes)
 
 for i, ficha in enumerate(sobrevivientes[:tope_juez]):
 
-    puesto_texto = "TITLE: " + ficha["titulo"] + "\n\nDESCRIPTION: " + ficha["texto"]
+    # NUEVO (Nov 2026) — tope al largo de la descripción. Un aviso de WWR
+    # (Zanda Health, Product Owner) traía ~981.000 tokens de texto: OpenAI lo
+    # rechazaba todos los días (context_length_exceeded) y, como nunca se
+    # juzgaba, volvía a fallar al día siguiente. Además gpt-6-luna cobra el
+    # doble por encima de 272K tokens. 20.000 caracteres (~5.000 tokens)
+    # sobran para cualquier aviso normal.
+    puesto_texto = "TITLE: " + ficha["titulo"] + "\n\nDESCRIPTION: " + ficha["texto"][:TOPE_CARACTERES]
 
     # --- Blindaje de RED (Capa 3.2): la llamada puede fallar antes de que
     # llegue respuesta (timeout, conexión cortada). Eso NO es una respuesta

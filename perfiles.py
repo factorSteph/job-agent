@@ -159,7 +159,8 @@ ESTEBAN_TITULOS_NO = [
     "account executive", "sales development", "sdr", "bdr",
     # Puestos en Alemania (Arbeitnow): "(m/w/d)" es la marca legal de los
     # avisos alemanes, casi siempre presenciales y en alemán.
-    "m/w/d", "w/m/d", "m/f/d", "entwickler",
+    "m/w/d", "w/m/d", "m/f/d", "x/w/m", "w/x/m", "m/w/x", "d/m/w",
+    "f/m/d", "m/w/div", "entwickler",
 ]
 
 ESTEBAN_TITULOS_NO_JUNIOR = []

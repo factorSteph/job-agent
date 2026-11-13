@@ -89,6 +89,7 @@ CAEN = {
         "Senior Software Engineer, Security",
         "Site Reliability Engineer (Security)",
         "Account Executive - Cybersecurity",
+        "Account Manager | Legal Tech | SaaS (x/w/m) - Remote",
     ],
 }
 
