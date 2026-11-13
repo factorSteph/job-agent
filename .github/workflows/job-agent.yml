@@ -4,6 +4,14 @@ on:
   schedule:
     - cron: "37 9 * * *"
   workflow_dispatch:
+    # NUEVO (Nov 2026) — casilla en el botón "Run workflow". Marcada: NO corre
+    # el agente; provoca una falla a propósito para probar que el correo de
+    # falla sale, y ese correo va SOLO a Steph (no le llega a Esteban).
+    inputs:
+      probar_aviso:
+        description: "Solo probar el correo de falla (va solo a Steph)"
+        type: boolean
+        default: false
 
 # NUEVO (Oct 2026) — permiso para que la corrida suba vistos_<PERFIL>.json
 # al repo. Efecto secundario a favor: ese commit diario cuenta como
@@ -32,7 +40,14 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - run: python buscar_empleos.py
+      - name: Falla de prueba (solo con probar_aviso)
+        if: ${{ inputs.probar_aviso }}
+        run: |
+          echo "Modo prueba: falla a propósito para disparar el correo de falla."
+          exit 1
+
+      - if: ${{ !inputs.probar_aviso }}
+        run: python buscar_empleos.py
         env:
           PERFIL: ${{ matrix.perfil }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -65,3 +80,4 @@ jobs:
           PERFIL: ${{ matrix.perfil }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           ESTEBAN_EMAIL: ${{ secrets.ESTEBAN_EMAIL }}
+          PRUEBA: ${{ inputs.probar_aviso && '1' || '' }}

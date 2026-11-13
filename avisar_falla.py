@@ -23,6 +23,12 @@ perfil = PERFILES[nombre_perfil]
 mi_correo = "steph.jimenezcor@gmail.com"  # remitente: siempre el Gmail autenticado
 destino = perfil["correo_destino"]
 
+# Modo prueba (botón "Run workflow" con "probar_aviso" marcado): manda el
+# aviso SOLO a Steph, para revisar que el correo sale sin asustar a Esteban.
+es_prueba = os.environ.get("PRUEBA") == "1"
+if es_prueba:
+    destino = mi_correo
+
 # Link directo a la corrida que falló, para ver el log con un clic.
 link_corrida = (
     os.environ.get("GITHUB_SERVER_URL", "https://github.com") + "/"
@@ -31,7 +37,7 @@ link_corrida = (
 )
 
 correo = EmailMessage()
-correo["Subject"] = "Job Agent (" + perfil["nombre"] + "): la corrida de hoy FALLÓ"
+correo["Subject"] = ("[PRUEBA] " if es_prueba else "") + "Job Agent (" + perfil["nombre"] + "): la corrida de hoy FALLÓ"
 correo["From"] = mi_correo
 correo["To"] = destino
 if destino != mi_correo:
