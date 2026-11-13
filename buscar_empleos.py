@@ -539,7 +539,11 @@ for i, ficha in enumerate(sobrevivientes[:tope_juez]):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "gpt-5-nano",
+                # NUEVO (Nov 2026) — gpt-5-nano se apaga el 11 de diciembre de
+                # 2026. gpt-6-luna es el reemplazo oficial que recomienda
+                # OpenAI: misma llamada (Chat Completions), USD 0.10 / 0.50
+                # por millón de tokens (entrada / salida).
+                "model": "gpt-6-luna",
                 "messages": [
                     {"role": "system", "content": instrucciones},
                     {"role": "user", "content": puesto_texto}

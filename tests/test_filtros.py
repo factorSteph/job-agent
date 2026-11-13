@@ -43,6 +43,19 @@ PASAN = {
         "International Security Consultant",          # Issue #1
         "Internal Penetration Tester",                # Issue #1
         "Senior Pentester - LATAM",
+        # Nov 2026 — técnicos y mixtos que le sirven; la IA decide, el
+        # filtro de títulos no los puede botar.
+        "Engagement Manager, Offensive Security",
+        "Cybersecurity Instructor",
+        "Security Trainer - Remote",
+        "Customer Success Engineer - Security",
+        "Systems Engineer - Palo Alto Networks",      # preventa en vendors
+        "Cloud Security Engineer",                     # no lo mata "cloud engineer"
+        "Developer Advocate, Security",
+        "Incident Response Consultant",
+        "PAM Consultant (BeyondTrust)",
+        "Knowledge Staff Engineer",
+        "Product Facilitator",
     ],
 }
 
@@ -65,6 +78,17 @@ CAEN = {
         "Entry-Level SOC Analyst",
         "AI Trainer - Security",
         "Security Engineer (US based)",
+        # Nov 2026 — títulos reales que le llegaron y NO quería.
+        "Knack: Cloud Engineer",
+        "OneImaging: Cloud Systems Administrator",
+        "Horizon3: Staff Technical Support Engineer (Web App)",
+        "Research Engineer Privacy and Anonymization",
+        "Entwickler One Identity Manager – IAM, C# / .NET (m/w/d)",
+        "Consultant Informationssicherheit / IT-Risikomanagement – ISO 27001 (m/w/d)",
+        "DevSecOps Engineer",
+        "Senior Software Engineer, Security",
+        "Site Reliability Engineer (Security)",
+        "Account Executive - Cybersecurity",
     ],
 }
 
